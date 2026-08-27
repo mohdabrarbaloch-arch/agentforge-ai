@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AgentForge — Your AI agents, working for you</title>
+  <meta name="description" content="Create AI agents, chat with them, and automate your busywork. Emails, Slack, Notion, images, websites, research, code." />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: { 50:'#eef4ff',100:'#dce7fd',200:'#c0d4fb',300:'#94b7f8',400:'#6190f3',500:'#3d6cee',600:'#2c4fe3' },
+          },
+          fontFamily: { sans: ['Inter','system-ui','-apple-system','Segoe UI','Roboto','sans-serif'] },
+        }
+      }
+    }
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/css/app.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>" />
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen antialiased dark">
+  <div id="app" class="min-h-screen flex flex-col"></div>
+  <div id="toast-wrap" class="fixed top-4 right-4 z-50 space-y-2"></div>
+  <script src="/static/js/app.js"></script>
+  <script src="/static/js/pages/dashboard.js"></script>
+  <script src="/static/js/pages/agents.js"></script>
+  <script src="/static/js/pages/chat.js"></script>
+  <script src="/static/js/pages/tasks.js"></script>
+  <script src="/static/js/pages/triggers.js"></script>
+  <script src="/static/js/pages/integrations.js"></script>
+</body>
+</html>
