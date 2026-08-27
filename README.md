@@ -29,15 +29,15 @@ AgentForge is a production-ready AI agent platform — think of it as your own l
 
 | Dashboard | Chat |
 |---|---|
-| ![Dashboard](screenshots/dashboard.png) | ![Chat](screenshots/chat.png) |
+| ![Dashboard](screenshots/dashboard.jpg) | ![Chat](screenshots/chat.jpg) |
 
 | Agents | Tasks |
 |---|---|
-| ![Agents](screenshots/agents.png) | ![Tasks](screenshots/tasks.png) |
+| ![Agents](screenshots/agents.jpg) | ![Tasks](screenshots/tasks.jpg) |
 
 | Automations | Integrations |
 |---|---|
-| ![Triggers](screenshots/triggers.png) | ![Integrations](screenshots/integrations.png) |
+| ![Triggers](screenshots/triggers.jpg) | ![Integrations](screenshots/integrations.jpg) |
 
 ## 🚀 Quick start (local, zero config)
 
