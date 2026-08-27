@@ -29,15 +29,15 @@ AgentForge is a production-ready AI agent platform — think of it as your own l
 
 | Dashboard | Chat |
 |---|---|
-| ![Dashboard](screenshots/dashboard.jpg) | ![Chat](screenshots/chat.jpg) |
+| ![Dashboard](https://static.teamily.ai/sites/fe69dff3-07d3-4879-8f02-c93873a85f20/documents/dashboard/dashboard.png) | ![Chat](https://static.teamily.ai/sites/fe69dff3-07d3-4879-8f02-c93873a85f20/documents/chat/chat.png) |
 
 | Agents | Tasks |
 |---|---|
-| ![Agents](screenshots/agents.jpg) | ![Tasks](screenshots/tasks.jpg) |
+| ![Agents](https://static.teamily.ai/sites/fe69dff3-07d3-4879-8f02-c93873a85f20/documents/agents/agents.png) | ![Tasks](https://static.teamily.ai/sites/fe69dff3-07d3-4879-8f02-c93873a85f20/documents/tasks/tasks.png) |
 
 | Automations | Integrations |
 |---|---|
-| ![Triggers](screenshots/triggers.jpg) | ![Integrations](screenshots/integrations.jpg) |
+| ![Triggers](https://static.teamily.ai/sites/fe69dff3-07d3-4879-8f02-c93873a85f20/documents/triggers/triggers.png) | ![Integrations](https://static.teamily.ai/sites/fe69dff3-07d3-4879-8f02-c93873a85f20/documents/integrations/integrations.png) |
 
 ## 🚀 Quick start (local, zero config)
 
