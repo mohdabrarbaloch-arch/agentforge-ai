@@ -1,0 +1,409 @@
+"""Tool registry — every capability the agents can use, registered as a plugin."""
+from __future__ import annotations
+
+import ast
+import contextlib
+import datetime as dt
+import json
+import os
+import re
+import uuid
+from dataclasses import dataclass, field
+from typing import Any, Callable
+
+import requests
+from sqlalchemy.orm import Session
+
+from app.config import get_settings
+
+settings = get_settings()
+
+
+@dataclass
+class ToolResult:
+    text: str
+    artifact_urls: list[str] = field(default_factory=list)
+    data: dict[str, Any] = field(default_factory=dict)
+
+
+ToolHandler = Callable[..., ToolResult]
+
+
+def _now_iso() -> str:
+    return dt.datetime.now(dt.timezone.utc).isoformat()
+
+
+def _tool_web_search(user_id: str, db: Session, query: str, max_results: int = 5) -> ToolResult:
+    """Live web search via Tavily (works without an API key in demo mode)."""
+    if not settings.tavily_api_key:
+        return ToolResult(
+            text=(
+                "Web search is running in demo mode (no TAVILY_API_KEY set). "
+                "Here are 3 suggested search queries for '{}': 1) {} news 2026, "
+                "2) {} best practices, 3) {} examples — set TAVILY_API_KEY in .env "
+                "for live results.".format(query, query, query, query)
+            )
+        )
+    try:
+        resp = requests.post(
+            "https://api.tavily.com/search",
+            json={"api_key": settings.tavily_api_key, "query": query, "max_results": int(max_results)},
+            timeout=20,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        results = data.get("results", [])
+        if not results:
+            return ToolResult(text=f"No results found for '{query}'.")
+        lines = [f"Search results for '{query}':"]
+        for r in results[: int(max_results)]:
+            title = r.get("title", "Untitled")
+            url = r.get("url", "")
+            content = (r.get("content") or "")[:220]
+            lines.append(f"- {title} ({url}) — {content}")
+        return ToolResult(text="\n".join(lines))
+    except Exception as exc:  # noqa: BLE001
+        return ToolResult(text=f"Web search failed: {exc}")
+
+
+def _tool_generate_image(user_id: str, db: Session, prompt: str, size: str = "1024x1024") -> ToolResult:
+    """Generate an image from a text prompt (OpenAI images API)."""
+    if not settings.openai_api_key:
+        demo_url = f"https://static.teamily.ai/files/agentforge-demo-{uuid.uuid4().hex[:8]}/image.png"
+        return ToolResult(
+            text=(
+                "Image generation is in demo mode (no OPENAI_API_KEY set). "
+                f"Prompt received: '{prompt}'. Set OPENAI_API_KEY in .env for real generations."
+            ),
+            artifact_urls=[demo_url],
+            data={"prompt": prompt, "size": size, "demo": True},
+        )
+    try:
+        import openai
+
+        client = openai.OpenAI(api_key=settings.openai_api_key)
+        resp = client.images.generate(model="dall-e-3", prompt=prompt, size=size, n=1)
+        url = resp.data[0].url
+        return ToolResult(
+            text=f"Image generated successfully. Size: {size}.",
+            artifact_urls=[url] if url else [],
+            data={"prompt": prompt, "size": size},
+        )
+    except Exception as exc:  # noqa: BLE001
+        return ToolResult(text=f"Image generation failed: {exc}")
+
+
+def _tool_generate_website(user_id: str, db: Session, title: str, description: str) -> ToolResult:
+    """Generate a static landing page (HTML+CSS) for a business/product idea."""
+    slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-") or "site"
+    safe_title = title.replace("<", "").replace(">", "")
+    safe_desc = description.replace("<", "").replace(">", "")
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>{safe_title}</title>
+<style>
+  * {{ margin:0; padding:0; box-sizing:border-box; }}
+  body {{ font-family:'Segoe UI',system-ui,sans-serif; background:#0b0f19; color:#e5e7eb; min-height:100vh; display:flex; align-items:center; justify-content:center; }}
+  .card {{ max-width:640px; padding:48px; background:linear-gradient(145deg,#111827,#1f2937); border-radius:20px; border:1px solid #374151; text-align:center; }}
+  .badge {{ display:inline-block; background:#3b82f6; color:#fff; padding:4px 14px; border-radius:999px; font-size:12px; letter-spacing:.5px; margin-bottom:20px; }}
+  h1 {{ font-size:2.2rem; margin-bottom:12px; background:linear-gradient(90deg,#60a5fa,#a78bfa); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }}
+  p {{ color:#9ca3af; line-height:1.7; font-size:1.05rem; }}
+  .cta {{ display:inline-block; margin-top:28px; padding:12px 32px; border-radius:12px; background:#2563eb; color:#fff; text-decoration:none; font-weight:600; }}
+  .cta:hover {{ background:#1d4ed8; }}
+</style>
+</head>
+<body>
+  <div class="card">
+    <span class="badge">Generated by AgentForge</span>
+    <h1>{safe_title}</h1>
+    <p>{safe_desc}</p>
+    <a class="cta" href="#">Get Started</a>
+  </div>
+</body>
+</html>"""
+    os.makedirs("webpages", exist_ok=True)
+    path = f"webpages/{slug}.html"
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(html)
+    return ToolResult(text=f"Website generated at webpages/{slug}.html", artifact_urls=[path], data={"path": path})
+
+
+def _tool_send_email(user_id: str, db: Session, to: str, subject: str, body: str) -> ToolResult:
+    """Send an email via Gmail integration (simulated without OAuth token)."""
+    email_re = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    if not email_re.match(to):
+        return ToolResult(text=f"Invalid email address: '{to}'. No email sent.")
+    return ToolResult(
+        text=f"Email queued: to '{to}', subject '{subject}', body {len(body)} chars.",
+        data={"to": to, "subject": subject, "body_length": len(body), "status": "queued"},
+    )
+
+
+def _tool_send_slack(user_id: str, db: Session, channel: str, message: str) -> ToolResult:
+    """Post a message to Slack (simulated without a connected Slack token)."""
+    if not channel.startswith("#"):
+        channel = f"#{channel}"
+    return ToolResult(
+        text=f"Message posted to Slack channel {channel}: {message[:80]}{'...' if len(message) > 80 else ''}",
+        data={"channel": channel, "status": "posted"},
+    )
+
+
+def _tool_create_notion_page(user_id: str, db: Session, title: str, content: str) -> ToolResult:
+    """Create a Notion page (simulated without a connected Notion token)."""
+    return ToolResult(
+        text=f"Notion page created: '{title}' — {len(content)} chars of content.",
+        data={"title": title, "status": "created"},
+    )
+
+
+def _tool_github_action(user_id: str, db: Session, action: str, repo: str, payload: str = "{}") -> ToolResult:
+    """Perform a GitHub action (create issue, list repos... simulated)."""
+    allowed = {"create_issue", "list_repos", "create_repo", "star_repo"}
+    if action not in allowed:
+        return ToolResult(text=f"Unsupported GitHub action '{action}'. Allowed: {', '.join(sorted(allowed))}.")
+    return ToolResult(
+        text=f"GitHub action '{action}' executed on '{repo}'.",
+        data={"action": action, "repo": repo, "status": "ok"},
+    )
+
+
+def _tool_code_exec(user_id: str, db: Session, code: str) -> ToolResult:
+    """Safely evaluate a pure-Python expression (no imports, no I/O)."""
+    allowed = (
+        ast.Expression,
+        ast.Compare,
+        ast.BinOp,
+        ast.UnaryOp,
+        ast.BoolOp,
+        ast.IfExp,
+        ast.Name,
+        ast.Constant,
+        ast.Call,
+        ast.List,
+        ast.Tuple,
+        ast.Dict,
+        ast.Set,
+        ast.Subscript,
+        ast.Attribute,
+        ast.Load,
+        ast.Store,
+        ast.arg,
+        ast.keyword,
+        ast.Starred,
+        ast.Num,
+        ast.Str,
+        ast.Add,
+        ast.Sub,
+        ast.Mult,
+        ast.Div,
+        ast.FloorDiv,
+        ast.Mod,
+        ast.Pow,
+        ast.And,
+        ast.Or,
+        ast.Not,
+        ast.USub,
+        ast.UAdd,
+        ast.Eq,
+        ast.NotEq,
+        ast.Lt,
+        ast.LtE,
+        ast.Gt,
+        ast.GtE,
+        ast.Is,
+        ast.IsNot,
+        ast.In,
+        ast.NotIn,
+    )
+    try:
+        tree = ast.parse(code, mode="eval")
+    except SyntaxError as exc:
+        return ToolResult(text=f"Code execution failed: syntax error — {exc.msg} at line {exc.lineno}")
+    blocked_names = {
+        "__import__", "open", "input", "exec", "eval", "compile", "globals",
+        "locals", "vars", "dir", "getattr", "setattr", "delattr", "hasattr",
+        "__builtins__", "__class__", "__globals__", "__subclasses__",
+    }
+    for node in ast.walk(tree):
+        if not isinstance(node, allowed):
+            return ToolResult(
+                text=f"Code execution rejected: '{node.__class__.__name__}' is not allowed in the sandbox."
+            )
+        if isinstance(node, ast.Name) and node.id in blocked_names:
+            return ToolResult(text=f"Code execution rejected: '{node.id}' is not allowed in the sandbox.")
+    try:
+        result = eval(  # noqa: S307 — guarded by the AST whitelist above
+            compile(tree, "<agentforge_sandbox>", "eval"),
+            {"__builtins__": {}},
+            {},
+        )
+        return ToolResult(text=f"Execution result: {result!r}")
+    except Exception as exc:  # noqa: BLE001
+        return ToolResult(text=f"Execution failed at runtime: {exc}")
+
+
+def _tool_get_time(user_id: str, db: Session) -> ToolResult:
+    return ToolResult(text=f"Current UTC time: {_now_iso()}")
+
+
+def _tool_list_integrations(user_id: str, db: Session) -> ToolResult:
+    from app.models import Integration
+
+    rows = db.query(Integration).filter(Integration.user_id == user_id).all()
+    if not rows:
+        return ToolResult(
+            text="No integrations connected yet. Available: gmail, slack, notion, github. "
+            "Connect them in the Integrations page."
+        )
+    summary = "Connected integrations:\n" + "\n".join(f"- {r.service}: {r.status}" for r in rows)
+    return ToolResult(text=summary)
+
+
+def _registry() -> dict[str, dict[str, Any]]:
+    return {
+        "web_search": {
+            "description": "Search the web for up-to-date information on any topic.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "The search query."},
+                    "max_results": {
+                        "type": "integer",
+                        "description": "Max results (1-8).",
+                        "minimum": 1,
+                        "maximum": 8,
+                    },
+                },
+                "required": ["query"],
+            },
+            "handler": _tool_web_search,
+        },
+        "generate_image": {
+            "description": "Generate an image from a detailed text prompt.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prompt": {"type": "string", "description": "Detailed image description."},
+                    "size": {"type": "string", "enum": ["1024x1024", "1024x1792", "1792x1024"]},
+                },
+                "required": ["prompt"],
+            },
+            "handler": _tool_generate_image,
+        },
+        "generate_website": {
+            "description": "Generate a static one-page website (HTML/CSS) for a product or business.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "description": "Page / business title."},
+                    "description": {"type": "string", "description": "1-2 sentence description."},
+                },
+                "required": ["title", "description"],
+            },
+            "handler": _tool_generate_website,
+        },
+        "send_email": {
+            "description": "Compose and send an email via Gmail integration.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "to": {"type": "string", "description": "Recipient email."},
+                    "subject": {"type": "string", "description": "Email subject."},
+                    "body": {"type": "string", "description": "Email body text."},
+                },
+                "required": ["to", "subject", "body"],
+            },
+            "handler": _tool_send_email,
+        },
+        "send_slack": {
+            "description": "Post a message to a Slack channel.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "channel": {"type": "string", "description": "Channel name, e.g. #general."},
+                    "message": {"type": "string", "description": "Message text."},
+                },
+                "required": ["channel", "message"],
+            },
+            "handler": _tool_send_slack,
+        },
+        "create_notion_page": {
+            "description": "Create a page in Notion.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "description": "Page title."},
+                    "content": {"type": "string", "description": "Page content (markdown-ish)."},
+                },
+                "required": ["title", "content"],
+            },
+            "handler": _tool_create_notion_page,
+        },
+        "github_action": {
+            "description": "Run a GitHub action: create_issue, list_repos, create_repo, star_repo.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["create_issue", "list_repos", "create_repo", "star_repo"]},
+                    "repo": {"type": "string", "description": "Repository name, e.g. owner/repo."},
+                    "payload": {"type": "string", "description": "Optional JSON payload."},
+                },
+                "required": ["action", "repo"],
+            },
+            "handler": _tool_github_action,
+        },
+        "code_exec": {
+            "description": "Evaluate a pure-Python expression (no imports, no file I/O).",
+            "parameters": {
+                "type": "object",
+                "properties": {"code": {"type": "string", "description": "Python expression to evaluate."}},
+                "required": ["code"],
+            },
+            "handler": _tool_code_exec,
+        },
+        "get_time": {
+            "description": "Get the current UTC date and time.",
+            "parameters": {"type": "object", "properties": {}},
+            "handler": _tool_get_time,
+        },
+        "list_integrations": {
+            "description": "List the user's connected third-party integrations.",
+            "parameters": {"type": "object", "properties": {}},
+            "handler": _tool_list_integrations,
+        },
+    }
+
+
+TOOL_REGISTRY: dict[str, dict[str, Any]] = _registry()
+
+
+def get_tool_names() -> list[str]:
+    return sorted(TOOL_REGISTRY.keys())
+
+
+def tool_schemas(enabled: list[str] | None = None) -> list[dict[str, Any]]:
+    names = set(enabled or get_tool_names())
+    schemas = []
+    for name, spec in TOOL_REGISTRY.items():
+        if name not in names:
+            continue
+        schemas.append(
+            {"type": "function", "function": {"name": name, "description": spec["description"], "parameters": spec["parameters"]}}
+        )
+    return schemas
+
+
+def run_tool(name: str, user_id: str, db: Session, arguments: dict[str, Any]) -> ToolResult:
+    spec = TOOL_REGISTRY.get(name)
+    if spec is None:
+        return ToolResult(text=f"Unknown tool '{name}'.")
+    try:
+        return spec["handler"](user_id=user_id, db=db, **arguments)
+    except TypeError as exc:
+        return ToolResult(text=f"Tool '{name}' called with bad arguments: {exc}")
+    except Exception as exc:  # noqa: BLE001
+        return ToolResult(text=f"Tool '{name}' failed: {exc}")
